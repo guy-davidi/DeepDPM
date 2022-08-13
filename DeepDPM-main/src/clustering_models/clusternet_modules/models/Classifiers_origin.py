@@ -191,10 +191,10 @@ class Subclustering_net_duplicating(nn.Module):
             self.K = hparams.init_k
         else:
             self.K = k
+
         self.codes_dim = codes_dim
         self.hparams = hparams
         self.hidden_dim = 50
-
         self.softmax_norm = self.hparams.subcluster_softmax_norm
 
         # the subclustering net will be a stacked version of the clustering net
@@ -251,18 +251,13 @@ class Subclustering_net(nn.Module):
 
         self.codes_dim = codes_dim
         self.hparams = hparams
-        self.hidden_dim = 75
-        print("Change to hidden_dim = 75 is done")
+        self.hidden_dim = 50
         self.softmax_norm = self.hparams.softmax_norm
         self.device = "cuda" if torch.cuda.is_available() and hparams.gpus is not None else "cpu"
 
         # the subclustering net will be a stacked version of the clustering net
         self.class_fc1 = nn.Linear(self.codes_dim, self.hidden_dim * self.K)
         self.class_fc2 = nn.Linear(self.hidden_dim * self.K, 2 * self.K)
-
-        # dropout layer 
-        self.dropout = nn.Dropout(0.5)
-        print("Add dropout")
 
         gradient_mask_fc2 = torch.zeros(self.hidden_dim * self.K, 2 * self.K)
         # detach different subclustering nets - zeroing out the weights connecting between different subnets
@@ -277,7 +272,6 @@ class Subclustering_net(nn.Module):
     def forward(self, X):
         # Note that there is no softmax here
         X = F.relu(self.class_fc1(X))
-        X = self.dropout(X)
         X = self.class_fc2(X)
         return X
 
