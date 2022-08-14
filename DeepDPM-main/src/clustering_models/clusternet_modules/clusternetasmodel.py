@@ -752,7 +752,7 @@ class ClusterNetModel(pl.LightningModule):
         )
         # distinct parameter group for the last layer for easy update
         cluster_net_opt.add_param_group(
-            {"params": self.cluster_net.class_fc3.parameters()}
+            {"params": self.cluster_net.class_fc2.parameters()}
         )
         self.optimizers_dict_idx = {
             "cluster_net_opt": 0
