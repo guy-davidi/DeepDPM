@@ -626,13 +626,13 @@ class ClusterNetModel(pl.LightningModule):
             clus_opt = self.optimizers()
 
         # remove old weights from the optimizer state
-        for p in self.cluster_net.class_fc3.parameters():
+        for p in self.cluster_net.class_fc2.parameters():
             clus_opt.state.pop(p)
         self.cluster_net.update_K_split(
             split_decisions, self.hparams.init_new_weights, self.subclustering_net
         )
-        clus_opt.param_groups[1]["params"] = list(self.cluster_net.class_fc3.parameters())
-        self.cluster_net.class_fc3.to(self._device)
+        clus_opt.param_groups[1]["params"] = list(self.cluster_net.class_fc2.parameters())
+        self.cluster_net.class_fc2.to(self._device)
         mus_ind_to_split = torch.nonzero(torch.tensor(split_decisions), as_tuple=False)
         (
             self.mus_new,
@@ -728,7 +728,7 @@ class ClusterNetModel(pl.LightningModule):
             clus_opt = self.optimizers()
 
         # remove old weights from the optimizer state
-        for p in self.cluster_net.class_fc3.parameters():
+        for p in self.cluster_net.class_fc2.parameters():
             clus_opt.state.pop(p)
         
         # update cluster net
@@ -739,20 +739,20 @@ class ClusterNetModel(pl.LightningModule):
             init_new_weights=self.hparams.init_new_weights,
         )
         # add parameters to the optimizer
-        clus_opt.param_groups[1]["params"] = list(self.cluster_net.class_fc3.parameters())
+        clus_opt.param_groups[1]["params"] = list(self.cluster_net.class_fc2.parameters())
 
-        self.cluster_net.class_fc3.to(self._device)
+        self.cluster_net.class_fc2.to(self._device)
         self.mus_inds_to_merge = mus_lists_to_merge
 
     def configure_optimizers(self):
         # Get all params but last layer
-        cluster_params = torch.nn.ParameterList([p for n, p in self.cluster_net.named_parameters() if "class_fc3" not in n])
+        cluster_params = torch.nn.ParameterList([p for n, p in self.cluster_net.named_parameters() if "class_fc2" not in n])
         cluster_net_opt = optim.Adam(
             cluster_params, lr=self.hparams.cluster_lr
         )
         # distinct parameter group for the last layer for easy update
         cluster_net_opt.add_param_group(
-            {"params": self.cluster_net.class_fc3.parameters()}
+            {"params": self.cluster_net.class_fc2.parameters()}
         )
         self.optimizers_dict_idx = {
             "cluster_net_opt": 0
