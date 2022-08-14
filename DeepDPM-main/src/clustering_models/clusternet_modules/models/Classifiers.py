@@ -349,8 +349,8 @@ class Subclustering_net(nn.Module):
             # Adjust bias
             fc1_bias_not_split = class_fc1.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(self.hidden_dim)]
             fc1_bias_split = class_fc1.bias.data[split_decisions.bool().repeat_interleave(self.hidden_dim)]
-            fc2_bias_not_split = class_fc2.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(2)]
-            fc2_bias_split = class_fc2.bias.data[split_decisions.bool().repeat_interleave(2)]
+            fc2_bias_not_split = class_fc2.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(self.hidden_dim)]
+            fc2_bias_split = class_fc2.bias.data[split_decisions.bool().repeat_interleave(self.hidden_dim)]
             fc3_bias_not_split = class_fc3.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(2)]
             fc3_bias_split = class_fc3.bias.data[split_decisions.bool().repeat_interleave(2)]
 
