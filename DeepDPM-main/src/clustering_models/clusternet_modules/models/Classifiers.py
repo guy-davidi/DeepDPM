@@ -251,8 +251,8 @@ class Subclustering_net(nn.Module):
 
         self.codes_dim = codes_dim
         self.hparams = hparams
-        self.hidden_dim = 75
-        print("Change to hidden_dim = 75 is done")
+        self.hidden_dim = 50
+        print("Change to hidden_dim = 50 is done")
         self.softmax_norm = self.hparams.softmax_norm
         self.device = "cuda" if torch.cuda.is_available() and hparams.gpus is not None else "cpu"
 
@@ -267,6 +267,7 @@ class Subclustering_net(nn.Module):
 
         gradient_mask_fc2 = torch.zeros(self.hidden_dim * self.K, self.hidden_dim * self.K)
         gradient_mask_fc3 = torch.zeros(self.hidden_dim * self.K, 2 * self.K)
+
         # detach different subclustering nets - zeroing out the weights connecting between different subnets
         # and also zero their gradient
         for k in range(self.K):
@@ -283,7 +284,7 @@ class Subclustering_net(nn.Module):
         # Note that there is no softmax here
         X = F.relu(self.class_fc1(X))
         X = self.dropout(X)
-        X = self.class_fc2(X)
+        X = F.relu(self.class_fc2(X))
         X = self.dropout(X)
         X = self.class_fc3(X)
         return X
@@ -314,53 +315,51 @@ class Subclustering_net(nn.Module):
             self.class_fc1.weight.data = torch.cat(
                 [fc1_weights_not_split, fc1_new_weights]
             )
-            self.class_fc2.weight.data.fill_(0)
-            gradient_mask_fc2 = torch.zeros(self.hidden_dim * self.K, self.hidden_dim * self.K)
+
+            fc2_weights_not_split = class_fc2.weight.data[
+                                    torch.logical_not(split_decisions.bool()).repeat_interleave(self.hidden_dim), :]
+            fc2_weights_split = class_fc2.weight.data[split_decisions.bool().repeat_interleave(self.hidden_dim), :]
+            fc2_new_weights = self._initalize_weights_split(
+                fc2_weights_split, init_new_weight=init_new_weights
+            )
+            self.class_fc2.weight.data = torch.cat(
+                [fc2_weights_not_split, fc2_new_weights]
+            )
+
             self.class_fc3.weight.data.fill_(0)
             gradient_mask_fc3 = torch.zeros(self.hidden_dim * self.K, 2 * self.K)
             for i, k in enumerate(mus_ind_not_split):
                 # i is the new index of the cluster and k is the old one
-                self.class_fc3.weight.data[self.hidden_dim * i: self.hidden_dim * (i + 1),
-                self.hidden_dim * i: self.hidden_dim * (i + 1)] = class_fc3.weight.data[self.hidden_dim * k: self.hidden_dim * (k + 1),
+                self.class_fc3.weight.data[2 * i: 2 * (i + 1),
+                self.hidden_dim * i: self.hidden_dim * (i + 1)] = class_fc3.weight.data[2 * k: 2 * (k + 1),
                                                                   self.hidden_dim * k: self.hidden_dim * (k + 1)]
-                gradient_mask_fc3[self.hidden_dim * i:self.hidden_dim * (i + 1), self.hidden_dim * i: self.hidden_dim * (i + 1)] = 1
-                self.class_fc3.weight.data[2 * i: 2*(i + 1), self.hidden_dim * i: self.hidden_dim * (i+1)] = class_fc2.weight.data[2 * k: 2*(k + 1), self.hidden_dim * k: self.hidden_dim * (k+1)]
                 gradient_mask_fc3[self.hidden_dim * i:self.hidden_dim * (i + 1), 2 * i: 2 * (i + 1)] = 1
             for j, k in enumerate(mus_ind_to_split.repeat_interleave(2)):
                 # j + len(mus_ind_not_split) is the new index and k is the old one. We use interleave to create 2 new clusters for each split cluster
                 i = j + len(mus_ind_not_split)
-                weights = class_fc2.weight.data[2 * k: 2*(k + 1), self.hidden_dim * k: self.hidden_dim * (k+1)]
+                weights = class_fc3.weight.data[2 * k: 2 * (k + 1), self.hidden_dim * k: self.hidden_dim * (k + 1)]
                 if init_new_weights != 'same':
                     weights = self._initalize_weights_split(weights, init_new_weights, num=1)
-                self.class_fc3.weight.data[2 * i: 2*(i + 1), self.hidden_dim * i: self.hidden_dim * (i+1)] = weights
+                self.class_fc3.weight.data[2 * i: 2 * (i + 1), self.hidden_dim * i: self.hidden_dim * (i + 1)] = weights
                 gradient_mask_fc3[self.hidden_dim * i:self.hidden_dim * (i + 1), 2 * i: 2 * (i + 1)] = 1
 
-            self.class_fc3.weight.register_hook(lambda grad: grad.mul_(gradient_mask_fc2.T.to(device=self.device)))
+            self.class_fc3.weight.register_hook(lambda grad: grad.mul_(gradient_mask_fc3.T.to(device=self.device)))
 
-            for j, k in enumerate(mus_ind_to_split.repeat_interleave(2)):
-                # j + len(mus_ind_not_split) is the new index and k is the old one. We use interleave to create 2 new clusters for each split cluster
-                i = j + len(mus_ind_not_split)
-                weights = class_fc2.weight.data[self.hidden_dim * k: self.hidden_dim*(k + 1), self.hidden_dim * k: self.hidden_dim * (k+1)]
-                if init_new_weights != 'same':
-                    weights = self._initalize_weights_split(weights, init_new_weights, num=1)
-                self.class_fc2.weight.data[self.hidden_dim * i: self.hidden_dim*(i + 1), self.hidden_dim * i: self.hidden_dim * (i+1)] = weights
-                gradient_mask_fc2[self.hidden_dim * i:self.hidden_dim * (i + 1), self.hidden_dim * i: self.hidden_dim * (i + 1)] = 1
 
-            self.class_fc2.weight.register_hook(lambda grad: grad.mul_(gradient_mask_fc2.T.to(device=self.device)))
             # Adjust bias
             fc1_bias_not_split = class_fc1.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(self.hidden_dim)]
             fc1_bias_split = class_fc1.bias.data[split_decisions.bool().repeat_interleave(self.hidden_dim)]
             fc2_bias_not_split = class_fc2.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(2)]
             fc2_bias_split = class_fc2.bias.data[split_decisions.bool().repeat_interleave(2)]
-            fc2_bias_not_split = class_fc2.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(2)]
-            fc2_bias_split = class_fc3.bias.data[split_decisions.bool().repeat_interleave(2)]
+            fc3_bias_not_split = class_fc3.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(2)]
+            fc3_bias_split = class_fc3.bias.data[split_decisions.bool().repeat_interleave(2)]
 
             fc1_new_bias = self._initalize_bias_split(fc1_bias_split, init_new_weight=init_new_weights)
             fc2_new_bias = self._initalize_bias_split(fc2_bias_split, init_new_weight=init_new_weights)
             fc3_new_bias = self._initalize_bias_split(fc3_bias_split, init_new_weight=init_new_weights)
             self.class_fc1.bias.data = torch.cat([fc1_bias_not_split, fc1_new_bias])
             self.class_fc2.bias.data = torch.cat([fc2_bias_not_split, fc2_new_bias])
-            self.class_fc3.bias.data = torch.cat([fc2_bias_not_split, fc2_new_bias])
+            self.class_fc3.bias.data = torch.cat([fc3_bias_not_split, fc3_new_bias])
 
             self.class_fc1.to(device=self.device)
             self.class_fc2.to(device=self.device)
