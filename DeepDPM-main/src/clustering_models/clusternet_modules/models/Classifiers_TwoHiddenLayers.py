@@ -191,10 +191,10 @@ class Subclustering_net_duplicating(nn.Module):
             self.K = hparams.init_k
         else:
             self.K = k
-
         self.codes_dim = codes_dim
         self.hparams = hparams
         self.hidden_dim = 50
+
         self.softmax_norm = self.hparams.subcluster_softmax_norm
 
         # the subclustering net will be a stacked version of the clustering net
@@ -252,27 +252,41 @@ class Subclustering_net(nn.Module):
         self.codes_dim = codes_dim
         self.hparams = hparams
         self.hidden_dim = 50
+        print("Change to hidden_dim = 50 is done")
         self.softmax_norm = self.hparams.softmax_norm
         self.device = "cuda" if torch.cuda.is_available() and hparams.gpus is not None else "cpu"
 
         # the subclustering net will be a stacked version of the clustering net
         self.class_fc1 = nn.Linear(self.codes_dim, self.hidden_dim * self.K)
-        self.class_fc2 = nn.Linear(self.hidden_dim * self.K, 2 * self.K)
+        self.class_fc2 = nn.Linear(self.hidden_dim * self.K, self.hidden_dim * self.K)
+        self.class_fc3 = nn.Linear(self.hidden_dim * self.K, 2 * self.K)
 
-        gradient_mask_fc2 = torch.zeros(self.hidden_dim * self.K, 2 * self.K)
+        # dropout layer 
+        self.dropout = nn.Dropout(0)
+        print("Add dropout")
+
+        gradient_mask_fc2 = torch.zeros(self.hidden_dim * self.K, self.hidden_dim * self.K)
+        gradient_mask_fc3 = torch.zeros(self.hidden_dim * self.K, 2 * self.K)
+
         # detach different subclustering nets - zeroing out the weights connecting between different subnets
         # and also zero their gradient
         for k in range(self.K):
-            gradient_mask_fc2[self.hidden_dim * k:self.hidden_dim * (k + 1), 2 * k: 2 * (k + 1)] = 1
+            gradient_mask_fc2[self.hidden_dim * k:self.hidden_dim * (k + 1), self.hidden_dim * k: self.hidden_dim * (k + 1)] = 1
+            gradient_mask_fc3[self.hidden_dim * k:self.hidden_dim * (k + 1), 2 * k: 2 * (k + 1)] = 1
 
         self.class_fc2.weight.data *= gradient_mask_fc2.T
+        self.class_fc3.weight.data *= gradient_mask_fc3.T
         self.class_fc2.weight.register_hook(lambda grad: grad.mul_(gradient_mask_fc2.T.to(device=self.device)))
+        self.class_fc3.weight.register_hook(lambda grad: grad.mul_(gradient_mask_fc3.T.to(device=self.device)))
         # weights are zero and their grad will always be 0 so won't change
 
     def forward(self, X):
         # Note that there is no softmax here
         X = F.relu(self.class_fc1(X))
-        X = self.class_fc2(X)
+        X = self.dropout(X)
+        X = F.relu(self.class_fc2(X))
+        X = self.dropout(X)
+        X = self.class_fc3(X)
         return X
 
     def update_K_split(self, split_decisions, init_new_weights="same"):
@@ -282,55 +296,87 @@ class Subclustering_net(nn.Module):
 
         class_fc1 = self.class_fc1
         class_fc2 = self.class_fc2
+        class_fc3 = self.class_fc3
         mus_ind_to_split = torch.nonzero(split_decisions, as_tuple=False)
         mus_ind_not_split = torch.nonzero(torch.logical_not(split_decisions), as_tuple=False)
         self.K += len(mus_ind_to_split)
 
         with torch.no_grad():
             self.class_fc1 = nn.Linear(self.codes_dim, self.hidden_dim * self.K)
-            self.class_fc2 = nn.Linear(self.hidden_dim * self.K, 2 * self.K)
+            self.class_fc2 = nn.Linear(self.hidden_dim * self.K, self.hidden_dim * self.K)
+            self.class_fc3 = nn.Linear(self.hidden_dim * self.K, 2 * self.K)
 
             # Adjust weights
             fc1_weights_not_split = class_fc1.weight.data[torch.logical_not(split_decisions.bool()).repeat_interleave(self.hidden_dim), :]
             fc1_weights_split = class_fc1.weight.data[split_decisions.bool().repeat_interleave(self.hidden_dim), :]
             fc1_new_weights = self._initalize_weights_split(
-                fc1_weights_split, init_new_weight=init_new_weights
+                fc1_weights_split, init_new_weight=init_new_weights, layer_dim=[self.codes_dim, self.hidden_dim]
             )
             self.class_fc1.weight.data = torch.cat(
                 [fc1_weights_not_split, fc1_new_weights]
             )
+
             self.class_fc2.weight.data.fill_(0)
-            gradient_mask_fc2 = torch.zeros(self.hidden_dim * self.K, 2 * self.K)
+            gradient_mask_fc2 = torch.zeros(self.hidden_dim * self.K, self.hidden_dim * self.K)
             for i, k in enumerate(mus_ind_not_split):
                 # i is the new index of the cluster and k is the old one
-                self.class_fc2.weight.data[2 * i: 2*(i + 1), self.hidden_dim * i: self.hidden_dim * (i+1)] = class_fc2.weight.data[2 * k: 2*(k + 1), self.hidden_dim * k: self.hidden_dim * (k+1)]
-                gradient_mask_fc2[self.hidden_dim * i:self.hidden_dim * (i + 1), 2 * i: 2 * (i + 1)] = 1
+                self.class_fc2.weight.data[self.hidden_dim * i: self.hidden_dim * (i + 1),
+                self.hidden_dim * i: self.hidden_dim * (i + 1)] = class_fc2.weight.data[self.hidden_dim * k: self.hidden_dim * (k + 1),
+                                                                  self.hidden_dim * k: self.hidden_dim * (k + 1)]
+                gradient_mask_fc2[self.hidden_dim * i:self.hidden_dim * (i + 1), self.hidden_dim * i: self.hidden_dim * (i + 1)] = 1
             for j, k in enumerate(mus_ind_to_split.repeat_interleave(2)):
                 # j + len(mus_ind_not_split) is the new index and k is the old one. We use interleave to create 2 new clusters for each split cluster
                 i = j + len(mus_ind_not_split)
-                weights = class_fc2.weight.data[2 * k: 2*(k + 1), self.hidden_dim * k: self.hidden_dim * (k+1)]
+                weights = class_fc2.weight.data[self.hidden_dim * k: self.hidden_dim * (k + 1), self.hidden_dim * k: self.hidden_dim * (k + 1)]
                 if init_new_weights != 'same':
-                    weights = self._initalize_weights_split(weights, init_new_weights, num=1)
-                self.class_fc2.weight.data[2 * i: 2*(i + 1), self.hidden_dim * i: self.hidden_dim * (i+1)] = weights
-                gradient_mask_fc2[self.hidden_dim * i:self.hidden_dim * (i + 1), 2 * i: 2 * (i + 1)] = 1
+                    weights = self._initalize_weights_split(weights, init_new_weights, layer_dim=[self.hidden_dim, self.hidden_dim],
+                                                            num=1)
+                self.class_fc2.weight.data[self.hidden_dim * i: self.hidden_dim * (i + 1), self.hidden_dim * i: self.hidden_dim * (i + 1)] = weights
+                gradient_mask_fc2[self.hidden_dim * i:self.hidden_dim * (i + 1), self.hidden_dim * i: self.hidden_dim * (i + 1)] = 1
 
             self.class_fc2.weight.register_hook(lambda grad: grad.mul_(gradient_mask_fc2.T.to(device=self.device)))
+
+            self.class_fc3.weight.data.fill_(0)
+            gradient_mask_fc3 = torch.zeros(self.hidden_dim * self.K, 2 * self.K)
+            for i, k in enumerate(mus_ind_not_split):
+                # i is the new index of the cluster and k is the old one
+                self.class_fc3.weight.data[2 * i: 2 * (i + 1),
+                self.hidden_dim * i: self.hidden_dim * (i + 1)] = class_fc3.weight.data[2 * k: 2 * (k + 1),
+                                                                  self.hidden_dim * k: self.hidden_dim * (k + 1)]
+                gradient_mask_fc3[self.hidden_dim * i:self.hidden_dim * (i + 1), 2 * i: 2 * (i + 1)] = 1
+            for j, k in enumerate(mus_ind_to_split.repeat_interleave(2)):
+                # j + len(mus_ind_not_split) is the new index and k is the old one. We use interleave to create 2 new clusters for each split cluster
+                i = j + len(mus_ind_not_split)
+                weights = class_fc3.weight.data[2 * k: 2 * (k + 1), self.hidden_dim * k: self.hidden_dim * (k + 1)]
+                if init_new_weights != 'same':
+                    weights = self._initalize_weights_split(weights, init_new_weights, layer_dim=[self.hidden_dim, 2],
+                                                            num=1)
+                self.class_fc3.weight.data[2 * i: 2 * (i + 1), self.hidden_dim * i: self.hidden_dim * (i + 1)] = weights
+                gradient_mask_fc3[self.hidden_dim * i:self.hidden_dim * (i + 1), 2 * i: 2 * (i + 1)] = 1
+
+            self.class_fc3.weight.register_hook(lambda grad: grad.mul_(gradient_mask_fc3.T.to(device=self.device)))
+
 
             # Adjust bias
             fc1_bias_not_split = class_fc1.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(self.hidden_dim)]
             fc1_bias_split = class_fc1.bias.data[split_decisions.bool().repeat_interleave(self.hidden_dim)]
-            fc2_bias_not_split = class_fc2.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(2)]
-            fc2_bias_split = class_fc2.bias.data[split_decisions.bool().repeat_interleave(2)]
+            fc2_bias_not_split = class_fc2.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(self.hidden_dim)]
+            fc2_bias_split = class_fc2.bias.data[split_decisions.bool().repeat_interleave(self.hidden_dim)]
+            fc3_bias_not_split = class_fc3.bias.data[torch.logical_not(split_decisions.bool()).repeat_interleave(2)]
+            fc3_bias_split = class_fc3.bias.data[split_decisions.bool().repeat_interleave(2)]
 
             fc1_new_bias = self._initalize_bias_split(fc1_bias_split, init_new_weight=init_new_weights)
             fc2_new_bias = self._initalize_bias_split(fc2_bias_split, init_new_weight=init_new_weights)
+            fc3_new_bias = self._initalize_bias_split(fc3_bias_split, init_new_weight=init_new_weights)
             self.class_fc1.bias.data = torch.cat([fc1_bias_not_split, fc1_new_bias])
             self.class_fc2.bias.data = torch.cat([fc2_bias_not_split, fc2_new_bias])
+            self.class_fc3.bias.data = torch.cat([fc3_bias_not_split, fc3_new_bias])
 
             self.class_fc1.to(device=self.device)
             self.class_fc2.to(device=self.device)
+            self.class_fc3.to(device=self.device)
 
-            del class_fc1, class_fc2
+            del class_fc1, class_fc2, class_fc3
 
     def update_K_merge(self, merge_decisions, pairs_to_merge, highest_ll, init_new_weights="highest_ll"):
         """ Update the clustering net after a merge decision was made
@@ -348,18 +394,24 @@ class Subclustering_net(nn.Module):
 
         class_fc1 = self.class_fc1
         class_fc2 = self.class_fc2
+        class_fc3 = self.class_fc3
         mus_ind_not_merged = torch.nonzero(torch.logical_not(torch.tensor(merge_decisions)), as_tuple=False)
         self.K -= len(highest_ll)
 
         with torch.no_grad():
             self.class_fc1 = nn.Linear(self.codes_dim, self.hidden_dim * self.K)
-            self.class_fc2 = nn.Linear(self.hidden_dim * self.K, 2 * self.K)
+            self.class_fc2 = nn.Linear(self.hidden_dim * self.K, self.hidden_dim * self.K)
+            self.class_fc3 = nn.Linear(self.hidden_dim * self.K, 2 * self.K)
 
             # Adjust weights
             fc1_weights_not_merged = class_fc1.weight.data[torch.logical_not(torch.tensor(merge_decisions)).repeat_interleave(self.hidden_dim), :]
+            fc2_weights_not_merged = class_fc2.weight.data[
+                torch.logical_not(torch.tensor(merge_decisions)).repeat_interleave(self.hidden_dim), :]
             fc1_new_weights = []
+            fc2_new_weights = []
             fc1_new_bias = []
             fc2_new_bias = []
+            fc3_new_bias = []
             for merge_pair, highest_ll_k in zip(pairs_to_merge, highest_ll):
                 fc1_weights_merged = [
                     class_fc1.weight.data[k * self.hidden_dim: (k + 1) * self.hidden_dim, :] for k in merge_pair]
@@ -379,42 +431,65 @@ class Subclustering_net(nn.Module):
                 [fc1_weights_not_merged, fc1_new_weights]
             )
 
-            self.class_fc2.weight.data.fill_(0)
-            gradient_mask_fc2 = torch.zeros(self.hidden_dim * self.K, 2 * self.K)
+            for merge_pair, highest_ll_k in zip(pairs_to_merge, highest_ll):
+                fc2_weights_merged = [
+                    class_fc2.weight.data[k * self.hidden_dim: (k + 1) * self.hidden_dim, :] for k in merge_pair]
+                fc2_new_weights.append(self._initalize_weights_merge(
+                    fc2_weights_merged, (torch.tensor(highest_ll_k) == merge_pair[1]).item(), init_new_weight=init_new_weights
+                ))
+
+                fc2_bias_merged = [
+                    class_fc2.bias.data[k * self.hidden_dim: (k + 1) * self.hidden_dim] for k in merge_pair]
+                fc2_new_bias.append(self._initalize_weights_merge(
+                    fc2_bias_merged, (torch.tensor(highest_ll_k) == merge_pair[1]).item(), init_new_weight=init_new_weights
+                ))
+            fc2_new_weights = torch.cat(fc2_new_weights)
+            fc2_new_bias = torch.cat(fc2_new_bias)
+
+            self.class_fc2.weight.data = torch.cat(
+                [fc2_weights_not_merged, fc2_new_weights]
+            )
+
+            self.class_fc3.weight.data.fill_(0)
+            gradient_mask_fc3 = torch.zeros(self.hidden_dim * self.K, 2 * self.K)
             for i, k in enumerate(mus_ind_not_merged):
                 # i is the new index of the cluster and k is the old one
-                self.class_fc2.weight.data[2 * i: 2*(i + 1), self.hidden_dim * i: self.hidden_dim * (i+1)] =\
-                    class_fc2.weight.data[2 * k: 2*(k + 1), self.hidden_dim * k: self.hidden_dim * (k+1)]
-                gradient_mask_fc2[self.hidden_dim * i:self.hidden_dim * (i + 1), 2 * i: 2 * (i + 1)] = 1
+                self.class_fc3.weight.data[2 * i: 2*(i + 1), self.hidden_dim * i: self.hidden_dim * (i+1)] =\
+                    class_fc3.weight.data[2 * k: 2*(k + 1), self.hidden_dim * k: self.hidden_dim * (k+1)]
+                gradient_mask_fc3[self.hidden_dim * i:self.hidden_dim * (i + 1), 2 * i: 2 * (i + 1)] = 1
             for j, (merge_pair, highest_ll_k) in enumerate(zip(pairs_to_merge, highest_ll)):
                 # j + len(mus_ind_not_split) is the new index and k is the old one. We use interleave to create 2 new clusters for each split cluster
                 i = j + len(mus_ind_not_merged)
-                weights = [class_fc2.weight.data[2 * k: 2*(k + 1), self.hidden_dim * k: self.hidden_dim * (k+1)] for k in merge_pair]
+                weights = [class_fc3.weight.data[2 * k: 2*(k + 1), self.hidden_dim * k: self.hidden_dim * (k+1)] for k in merge_pair]
                 weights = self._initalize_weights_merge(weights, (torch.tensor(highest_ll_k) == merge_pair[1]).item(), init_new_weights)
-                bias = [class_fc2.bias.data[2 * k: 2*(k + 1)] for k in merge_pair]
+                bias = [class_fc3.bias.data[2 * k: 2*(k + 1)] for k in merge_pair]
                 bias = self._initalize_weights_merge(bias, (torch.tensor(highest_ll_k) == merge_pair[1]).item(), init_new_weights)
-                fc2_new_bias.append(bias)
-                self.class_fc2.weight.data[2 * i: 2*(i + 1), self.hidden_dim * i: self.hidden_dim * (i+1)] = weights
-                gradient_mask_fc2[self.hidden_dim * i:self.hidden_dim * (i + 1), 2 * i: 2 * (i + 1)] = 1
+                fc3_new_bias.append(bias)
+                self.class_fc3.weight.data[2 * i: 2*(i + 1), self.hidden_dim * i: self.hidden_dim * (i+1)] = weights
+                gradient_mask_fc3[self.hidden_dim * i:self.hidden_dim * (i + 1), 2 * i: 2 * (i + 1)] = 1
 
-            self.class_fc2.weight.register_hook(lambda grad: grad.mul_(gradient_mask_fc2.T.to(device=self.device)))
-            fc2_new_bias = torch.cat(fc2_new_bias)
+            self.class_fc3.weight.register_hook(lambda grad: grad.mul_(gradient_mask_fc3.T.to(device=self.device)))
+            fc3_new_bias = torch.cat(fc3_new_bias)
 
             # Adjust bias
             fc1_bias_not_merged = class_fc1.bias.data[torch.logical_not(merge_decisions).repeat_interleave(self.hidden_dim)]
-            fc2_bias_not_merged = class_fc2.bias.data[torch.logical_not(merge_decisions).repeat_interleave(2)]
+            fc2_bias_not_merged = class_fc2.bias.data[
+                torch.logical_not(merge_decisions).repeat_interleave(self.hidden_dim)]
+            fc3_bias_not_merged = class_fc3.bias.data[torch.logical_not(merge_decisions).repeat_interleave(2)]
 
             self.class_fc1.bias.data = torch.cat([fc1_bias_not_merged, fc1_new_bias])
             self.class_fc2.bias.data = torch.cat([fc2_bias_not_merged, fc2_new_bias])
+            self.class_fc3.bias.data = torch.cat([fc3_bias_not_merged, fc3_new_bias])
             self.class_fc1.to(device=self.device)
             self.class_fc2.to(device=self.device)
+            self.class_fc3.to(device=self.device)
 
-            del class_fc1, class_fc2
+            del class_fc1, class_fc2, class_fc3
 
-    def _initalize_weights_split(self, weight, init_new_weight, num=2):
+    def _initalize_weights_split(self, weight, init_new_weight, layer_dim, num=2):
         if init_new_weight == "same":
             # just duplicate
-            dup = weight.reshape(-1, self.hidden_dim, self.codes_dim).repeat_interleave(num, 0)
+            dup = weight.reshape(-1, layer_dim[1], layer_dim[0]).repeat_interleave(num, 0)
             return torch.cat([dup[i] for i in range(dup.size(0))])
         elif init_new_weight == "same_w_noise":
             # just duplicate
