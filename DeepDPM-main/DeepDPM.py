@@ -17,13 +17,14 @@ import numpy as np
 from src.datasets import CustomDataset
 from src.datasets import GMM_dataset
 from src.clustering_models.clusternet_modules.clusternetasmodel import ClusterNetModel
-from src.utils import check_args, cluster_acc
+from src.utils import check_args, cluster_acc, read_ts_dataset
 
 
 def parse_minimal_args(parser):
     # Dataset parameters
     parser.add_argument("--dir", default="./pretrained_embeddings/umap_embedded_datasets/", help="dataset directory")
     parser.add_argument("--dataset", default="custom")
+    parser.add_argument("--archive_name", default="regular")
     # Training parameters
     parser.add_argument(
         "--lr", type=float, default=0.002, help="learning rate (default: 1e-4)"
@@ -372,8 +373,6 @@ def run_on_embeddings_hyperparams(parent_parser):
     )
     return parser
 
-
-
 def train_cluster_net():
     parser = argparse.ArgumentParser(description="Only_for_embbedding")
     parser = parse_minimal_args(parser)
@@ -381,6 +380,8 @@ def train_cluster_net():
     args = parser.parse_args()
 
     args.train_cluster_net = args.max_epochs
+    if args.archive_name == 'UCRArchive_2018':
+        read_ts_dataset(args)
     
     if args.dataset == "synthetic":
         dataset_obj = GMM_dataset(args)
