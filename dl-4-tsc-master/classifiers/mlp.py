@@ -63,7 +63,7 @@ class Classifier_MLP:
 			exit()
 		# x_val and y_val are only used to monitor the test loss and NOT for training  
 		batch_size = 16
-		nb_epochs = 5000
+		nb_epochs = 10000
 
 		mini_batch_size = int(min(x_train.shape[0]/10, batch_size))
 
