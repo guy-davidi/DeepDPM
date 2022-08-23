@@ -378,6 +378,7 @@ def train_cluster_net():
     parser = parse_minimal_args(parser)
     parser = run_on_embeddings_hyperparams(parser)
     args = parser.parse_args()
+    
 
     args.train_cluster_net = args.max_epochs
     if args.archive_name == 'UCRArchive_2018':
@@ -418,7 +419,7 @@ def train_cluster_net():
     # Main body
     if args.seed:
         pl.utilities.seed.seed_everything(args.seed)
-    
+ 
     model = ClusterNetModel(hparams=args, input_dim=dataset_obj.data_dim, init_k=args.init_k)
     if args.save_checkpoints:
         from pytorch_lightning.callbacks import ModelCheckpoint

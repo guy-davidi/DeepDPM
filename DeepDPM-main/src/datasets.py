@@ -397,9 +397,9 @@ class TimeseriesDataset(MyDataset):
     
     def get_train_data(self):
         if self.args.archive_name == 'UCRArchive_2018':
-           train_codes = torch.DoubleTensor(torch.load(os.path.join(self.data_dir, "train_data.pt")))
+            train_codes = torch.DoubleTensor(torch.load(os.path.join(self.data_dir, "train_data.pt")))
         else:
-           train_codes = torch.Tensor(torch.load(os.path.join(self.data_dir, "train_data.pt")))
+            train_codes = torch.Tensor(torch.load(os.path.join(self.data_dir, "train_data.pt")))
         if self.args.transform_input_data:
             train_codes = transform_embeddings(self.args.transform_input_data, train_codes)
         if self.args.use_labels_for_eval:
@@ -415,7 +415,10 @@ class TimeseriesDataset(MyDataset):
 
     def get_test_data(self):
         try:
-            test_codes = torch.load(os.path.join(self.data_dir, "test_data.pt"))
+            if self.args.archive_name == 'UCRArchive_2018':
+                test_codes = torch.DoubleTensor(torch.load(os.path.join(self.data_dir, "test_data.pt")))
+            else:
+                test_codes = torch.Tensor(torch.load(os.path.join(self.data_dir, "test_data.pt")))
             if self.args.use_labels_for_eval:
                 test_labels = torch.load(os.path.join(self.data_dir, "test_labels.pt"))
             else:
