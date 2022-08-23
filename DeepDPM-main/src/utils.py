@@ -65,6 +65,6 @@ def read_ts_dataset(args):
     x_test = (x_test - x_test.mean(axis=1, keepdims=True)) / std_
 
     torch.save(torch.tensor(x_train), root_dir_dataset + '/' + 'train_data.pt')
-    torch.save(torch.tensor(y_train), root_dir_dataset + '/' + 'train_lables.pt')
+    torch.save(torch.tensor(y_train), root_dir_dataset + '/' + 'train_labels.pt')
     torch.save(torch.tensor(x_test), root_dir_dataset + '/' + 'test_data.pt')
-    torch.save(torch.tensor(y_test), root_dir_dataset + '/' + 'test_lables.pt')
+    torch.save(torch.tensor(y_test), root_dir_dataset + '/' + 'test_labels.pt')

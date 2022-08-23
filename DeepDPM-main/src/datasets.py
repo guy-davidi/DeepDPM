@@ -389,6 +389,48 @@ class CustomDataset(MyDataset):
         del test_labels
         return test_set
 
+class TimeseriesDataset(MyDataset):
+    def __init__(self, args):
+        super().__init__(args)
+        self.transformer = transforms.Compose([transforms.ToTensor()])
+        self._data_dim = 0
+    
+    def get_train_data(self):
+        if self.args.archive_name == 'UCRArchive_2018':
+           train_codes = torch.DoubleTensor(torch.load(os.path.join(self.data_dir, "train_data.pt")))
+        else:
+           train_codes = torch.Tensor(torch.load(os.path.join(self.data_dir, "train_data.pt")))
+        if self.args.transform_input_data:
+            train_codes = transform_embeddings(self.args.transform_input_data, train_codes)
+        if self.args.use_labels_for_eval:
+            train_labels = torch.load(os.path.join(self.data_dir, "train_labels.pt"))
+        else:
+            train_labels = torch.zeros((train_codes.size()[0]))
+        self._data_dim = train_codes.size()[1]
+        
+        train_set = TensorDatasetWrapper(train_codes, train_labels)
+        del train_codes
+        del train_labels
+        return train_set
+
+    def get_test_data(self):
+        try:
+            test_codes = torch.load(os.path.join(self.data_dir, "test_data.pt"))
+            if self.args.use_labels_for_eval:
+                test_labels = torch.load(os.path.join(self.data_dir, "test_labels.pt"))
+            else:
+                test_labels = torch.zeros((test_codes.size()[0]))
+        except FileNotFoundError:
+            print("Test data not found! running only with train data")
+            return TensorDatasetWrapper(torch.empty(0), torch.empty(0))
+        
+        if self.args.transform_input_data:
+            test_codes = transform_embeddings(self.args.transform_input_data, test_codes)
+        test_set = TensorDatasetWrapper(test_codes, test_labels)
+        del test_codes
+        del test_labels
+        return test_set
+
 
 def merge_datasets(set_1, set_2):
     """

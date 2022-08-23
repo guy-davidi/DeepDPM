@@ -14,7 +14,7 @@ from sklearn.metrics import normalized_mutual_info_score as NMI
 from sklearn.metrics import adjusted_rand_score as ARI
 import numpy as np
 
-from src.datasets import CustomDataset
+from src.datasets import CustomDataset, TimeseriesDataset
 from src.datasets import GMM_dataset
 from src.clustering_models.clusternet_modules.clusternetasmodel import ClusterNetModel
 from src.utils import check_args, cluster_acc, read_ts_dataset
@@ -386,7 +386,11 @@ def train_cluster_net():
     if args.dataset == "synthetic":
         dataset_obj = GMM_dataset(args)
     else:
-        dataset_obj = CustomDataset(args)
+        if args.archive_name == 'UCRArchive_2018':
+          read_ts_dataset(args)
+          dataset_obj = TimeseriesDataset(args)
+        else:
+          dataset_obj = CustomDataset(args)
     train_loader, val_loader = dataset_obj.get_loaders()
 
     tags = ['umap_embbeded_dataset']
