@@ -14,7 +14,7 @@ from sklearn.metrics import normalized_mutual_info_score as NMI
 from sklearn.metrics import adjusted_rand_score as ARI
 import numpy as np
 
-from src.datasets import CustomDataset
+from src.datasets import CustomDataset, TimeseriesDataset
 from src.datasets import GMM_dataset
 from src.clustering_models.clusternet_modules.clusternetasmodel import ClusterNetModel
 from src.utils import check_args, cluster_acc, read_ts_dataset
@@ -378,6 +378,7 @@ def train_cluster_net():
     parser = parse_minimal_args(parser)
     parser = run_on_embeddings_hyperparams(parser)
     args = parser.parse_args()
+    
 
     args.train_cluster_net = args.max_epochs
     if args.archive_name == 'UCRArchive_2018':
@@ -386,7 +387,11 @@ def train_cluster_net():
     if args.dataset == "synthetic":
         dataset_obj = GMM_dataset(args)
     else:
-        dataset_obj = CustomDataset(args)
+        if args.archive_name == 'UCRArchive_2018':
+          read_ts_dataset(args)
+          dataset_obj = TimeseriesDataset(args)
+        else:
+          dataset_obj = CustomDataset(args)
     train_loader, val_loader = dataset_obj.get_loaders()
 
     tags = ['umap_embbeded_dataset']
@@ -414,7 +419,7 @@ def train_cluster_net():
     # Main body
     if args.seed:
         pl.utilities.seed.seed_everything(args.seed)
-    
+ 
     model = ClusterNetModel(hparams=args, input_dim=dataset_obj.data_dim, init_k=args.init_k)
     if args.save_checkpoints:
         from pytorch_lightning.callbacks import ModelCheckpoint
