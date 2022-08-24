@@ -13,12 +13,12 @@ from pytorch_lightning.loggers.base import DummyLogger
 import numpy as np
 
 from src.AE_ClusterPipeline import AE_ClusterPipeline
-from src.datasets import MNIST, REUTERS, CustomDataset
+from src.datasets import MNIST, REUTERS, CustomDataset, TimeseriesDataset
 from src.clustering_models.clusternet_modules.clusternetasmodel import ClusterNetModel
 
 from sklearn.metrics import normalized_mutual_info_score as NMI
 from sklearn.metrics import adjusted_rand_score as ARI
-from src.utils import cluster_acc, check_args
+from src.utils import cluster_acc, check_args, read_ts_dataset
 
 
 def parse_args():
@@ -27,6 +27,7 @@ def parse_args():
     # Dataset parameters
     parser.add_argument("--dir", default="/path/to/dataset/", help="dataset directory")
     parser.add_argument("--dataset", default="custom")
+    parser.add_argument("--archive_name", default="regular")
 
     # Training parameters
     parser.add_argument(
@@ -161,6 +162,9 @@ def train_clusternet_with_alternations():
         data = MNIST(args)
     elif args.dataset == "reuters10k":
         data = REUTERS(args, how_many=10000)
+    elif args.archive_name == 'UCRArchive_2018':
+        read_ts_dataset(args)
+        data = TimeseriesDataset(args)
     else:
         data = CustomDataset(args)
 
