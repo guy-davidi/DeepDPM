@@ -13,17 +13,19 @@ import pytorch_lightning as pl
 from sklearn.metrics import normalized_mutual_info_score as NMI
 from sklearn.metrics import adjusted_rand_score as ARI
 import numpy as np
+import torch.nn as nn
 
-from src.datasets import CustomDataset
+from src.datasets import CustomDataset, TimeseriesDataset
 from src.datasets import GMM_dataset
 from src.clustering_models.clusternet_modules.clusternetasmodel import ClusterNetModel
-from src.utils import check_args, cluster_acc
+from src.utils import check_args, cluster_acc, read_ts_dataset
 
 
 def parse_minimal_args(parser):
     # Dataset parameters
     parser.add_argument("--dir", default="./pretrained_embeddings/umap_embedded_datasets/", help="dataset directory")
     parser.add_argument("--dataset", default="custom")
+    parser.add_argument("--archive_name", default="regular")
     # Training parameters
     parser.add_argument(
         "--lr", type=float, default=0.002, help="learning rate (default: 1e-4)"
@@ -372,20 +374,23 @@ def run_on_embeddings_hyperparams(parent_parser):
     )
     return parser
 
-
-
 def train_cluster_net():
     parser = argparse.ArgumentParser(description="Only_for_embbedding")
     parser = parse_minimal_args(parser)
     parser = run_on_embeddings_hyperparams(parser)
     args = parser.parse_args()
+    
 
     args.train_cluster_net = args.max_epochs
     
     if args.dataset == "synthetic":
         dataset_obj = GMM_dataset(args)
     else:
-        dataset_obj = CustomDataset(args)
+        if args.archive_name == 'UCRArchive_2018':
+          read_ts_dataset(args)
+          dataset_obj = TimeseriesDataset(args)
+        else:
+          dataset_obj = CustomDataset(args)
     train_loader, val_loader = dataset_obj.get_loaders()
 
     tags = ['umap_embbeded_dataset']
@@ -413,8 +418,14 @@ def train_cluster_net():
     # Main body
     if args.seed:
         pl.utilities.seed.seed_everything(args.seed)
+
+    if args.archive_name == 'UCRArchive_2018':
+          embed_size = 10 
+          feature_extractor =  nn.Embedding(dataset_obj.data_dim,  embed_size)
+    else: 
+          feature_extractor = None
     
-    model = ClusterNetModel(hparams=args, input_dim=dataset_obj.data_dim, init_k=args.init_k)
+    model = ClusterNetModel(hparams=args, feature_extractor=feature_extractor, input_dim=dataset_obj.data_dim, init_k=args.init_k)
     if args.save_checkpoints:
         from pytorch_lightning.callbacks import ModelCheckpoint
         checkpoint_callback = ModelCheckpoint(dirpath = f"./saved_models/{args.dataset}/{args.exp_name}")
