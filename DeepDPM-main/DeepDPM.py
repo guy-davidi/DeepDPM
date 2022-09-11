@@ -420,7 +420,7 @@ def train_cluster_net():
         pl.utilities.seed.seed_everything(args.seed)
 
     if args.archive_name == 'UCRArchive_2018':
-          embed_size = 10 
+          embed_size = args.latent_dim
           feature_extractor =  nn.Embedding(dataset_obj.data_dim,  embed_size)
     else: 
           feature_extractor = None
