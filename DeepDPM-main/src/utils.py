@@ -40,8 +40,10 @@ def cluster_acc(y_true, y_pred):
 def read_ts_dataset(args):
     root_dir_dataset = args.dir
     df_train = pd.read_csv(root_dir_dataset + '/' + args.dataset + '_TRAIN.tsv', sep='\t', header=None)
+    df_train = df_train.fillna(0)
 
     df_test = pd.read_csv(root_dir_dataset + '/' + args.dataset + '_TEST.tsv', sep='\t', header=None)
+    df_test = df_test.fillna(0)
 
     y_train = df_train.values[:, 0]
     y_test = df_test.values[:, 0]
